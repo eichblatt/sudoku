@@ -21,33 +21,53 @@ logger.addHandler(ch)
 class sudoku_puzzle:
     def __init__(self,xsize=3,ysize=3,difficulty=0):
       self.complete_board = sudoku_board(xsize,ysize)
-      self.board = self.generate(self.complete_board,difficulty)
+      self.board = sudoku_board(xsize,ysize,self.complete_board.data)
+      self.board_stack = []
+      #self.generate(self.complete_board,difficulty)
       #self.shape = self.board.data.shape
 
-    def generate(self,board,difficulty=0):
+    def generate(self,difficulty=0):
       """ generate a puzzle from the board, based on difficulty. 
           Remove an element at a time, and ensure that it is solvable. """
-      
-      solvable = self.is_solvable(board) 
-      if not solvable: raise ImpossibleGridError(board.data,"Impossible Initial Grid")
 
-      #while solvable: 
-      #  last_valid_board = np.copy(board)
-      #  # tmp_board = self.remove_element(board)
-      #  solvable = self.is_solvable(board) 
-      #return last_valid_board
+      while self.is_solvable(self.board): 
+        self.board_stack.append(np.copy(self.board.data))
+        populated_elements = np.argwhere(self.board.data!=self.board.unknown_val) 
+        remove_elem = populated_elements[np.random.randint(0,len(populated_elements))]
+        self.board.unset_cell(remove_elem[0],remove_elem[1])
+         
+      self.board_stack.pop()
+      self.board.populate(self.board_stack[-1])
 
+      return self.board
 
     def solve(self,board):
-      """ Solve the given board """
-      #tmp = sudoku_board(self.shape[0],self.shape[1])
-      tmp.populate(board.data)
-      return self.board
+      """ Solve the given board. Throw ImpossibleGridError if board is unsolvable """
+      tmp = sudoku_board(board.xsize,board.ysize)
+      tmp.populate(board.data,uniquely=True)
+      
+      return tmp.data
 
     def is_solvable(self,board):
       """ Return True if solvable, False if impossible to solve """  
-       
-      return True
+      solvable = True
+      mask = board.data==board.unknown_val  # spots which are unknown
+      if mask.sum() == 0: return True
+      min_possible = np.min(board.Npossible[mask])
+      if min_possible == 0:
+         solvable = False
+      if min_possible > 1:
+         solvable = False
+      if min_possible == 1:
+         try:
+           self.solve(board)
+           solvable = True
+         except ImpossibleGridError as err:
+           print (err.message)
+           solvable = False
+         except:
+           print ("Error Solving")
+      return solvable
 
 
 class sudoku_board:
@@ -62,7 +82,7 @@ class sudoku_board:
       self.Npossible = None
       self.unknown_val = 0     # this seems restricted to be only 0.
       self.already_populated_val = self.size + 10
-      self.zero_board() # initialize the board with zeros.
+      self.unset_board() # initialize the board with zeros.
 
       while (self.data==self.unknown_val).sum()>0:
         try:
@@ -71,14 +91,16 @@ class sudoku_board:
           logger.debug ("{}\n {}".format(err.message,err.board_data))
           pass
 
-      self.rows = [sudoku_row(self,i) for i in range(self.size)]
-      self.cols = [sudoku_col(self,i) for i in range(self.size)]
-      self.squares = [sudoku_square(self,i) for i in range(self.size)]
-
     def __str__(self):
       return str(self.data)
 
-    def zero_board(self):
+    def unset_cell(self,row,col):
+      initial_data = np.copy(self.data)
+      initial_data[row,col] = self.unknown_val
+      self.populate_from_initial(initial_data) 
+      return self.data
+   
+    def unset_board(self):
       self.prev_data = np.copy(self.data)
       self.data = np.full([self.size,self.size],self.unknown_val,dtype=int)
       self.possible = np.empty([self.size,self.size,self.size],dtype=int)
@@ -108,7 +130,7 @@ class sudoku_board:
       return self.possible
 
     def populate_from_initial(self,initial_data):
-      self.zero_board()
+      self.unset_board()
       self.data = np.copy(initial_data)
       it = np.nditer(self.data,flags=['multi_index'])
       for elem in it: 
@@ -117,107 +139,30 @@ class sudoku_board:
       for elem in it: self.update_possible(it.multi_index[0],it.multi_index[1])
       return self.data
 
-    def populate_cell(self,mask):
+    def populate_cell(self,mask,uniquely=False):
       Npossible = np.where(mask,self.Npossible,self.unknown_val)
       Npossible[self.data != self.unknown_val]=self.already_populated_val
       row,col = np.unravel_index(np.argmin(Npossible,axis=None),Npossible.shape)
       poss = self.possible[row,col]
       poss = np.unique(poss[poss != self.unknown_val])
       if(Npossible==self.unknown_val).sum() > 0: raise ImpossibleGridError(self.data,"Impossible Grid Failure")
+      if(uniquely and self.Npossible[row,col]!=1): raise ImpossibleGridError(self.data,"No Unique Solution")
       self.data[row,col] = np.random.choice(poss,1,False)
       self.update_possible(row,col)
       mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
       return mask
  
-    def populate(self,initial_data=None):
+    def populate(self,initial_data=None,uniquely=False):
       if not(initial_data is None): return self.populate_from_initial(initial_data)
       else: 
-        self.zero_board()
+        self.unset_board()
         mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
-        while mask.sum() > 0: mask = self.populate_cell(mask)
+        while mask.sum() > 0: mask = self.populate_cell(mask,uniquely)
       return self.data
-
-    def populate1(self,initial_data=None):
-      self.zero_board()
-      if not(initial_data is None): 
-        self.data = np.copy(initial_data)
-        it = np.nditer(self.data,flags=['multi_index'])
-        for elem in it: 
-          if elem == self.unknown_val: self.possible[it.multi_index]=self.value_list
-        it.reset()
-        pdb.set_trace()
-        for elem in it: self.update_possible(it.multi_index[0],it.multi_index[1])
-      else: 
-        mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
-        while mask.sum() > 0:
-          Npossible = np.where(mask,self.Npossible,self.unknown_val)
-          Npossible[self.data != self.unknown_val]=self.already_populated_val
-          row,col = np.unravel_index(np.argmin(Npossible,axis=None),Npossible.shape)
-          poss = self.possible[row,col]
-          poss = np.unique(poss[poss != self.unknown_val])
-          if(Npossible==self.unknown_val).sum() > 0:
-            raise ImpossibleGridError(self.data,"Impossible Grid Failure")
-          if initial_data == None: self.data[row,col] = np.random.choice(poss,1,False)
-          self.update_possible(row,col)
-          mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
-      return self.data
-
 
     def display(self):
       print (self.data)
  
-class sudoku_group:
-
-    def __init__(self,board,i):
-       self.board = board
-
-    def is_valid(self):
-       non_zeros = self.data[np.where(self.data!=self.board.unknown_val)[0]]
-       return np.array_equal(np.unique(non_zeros),non_zeros)   
-
-    def is_complete(self):
-       size = np.size(self.data)
-       return all([_ in self.board.value_list for _ in self.data.reshape(size,1)])
-
-    def set_elem(self,i,val):
-       if not val in np.concatenate((self.board.unknown_val,self.board.value_list)):
-         raise ValueError
-       if (val!=0) and (val in self.data):
-         raise ValueError
-       self.data[i] = val
-
-    def reset_elem(self,i):
-       self.board.prev_data = np.copy(self.board.data)
-       self.data[i] = self.board.unknown_val
-
-class sudoku_row(sudoku_group):
-    def __init__(self,board,i):
-       self.board = board
-       self.data = board.data[i]
-    
-class sudoku_col(sudoku_group):
-    def __init__(self,board,i):
-       self.board = board
-       self.data = board.data[:,i]
-
-class sudoku_square(sudoku_group):
-    def __init__(self,board,i):
-       self.board = board;
-       xsize = board.xsize; ysize = board.ysize;
-       self.row_bound = ysize*math.floor(i/ysize)
-       self.col_bound = xsize*(i%xsize)
-       self.data = board.data[self.row_bound:self.row_bound+ysize,self.col_bound:self.col_bound+xsize]
-
-    def set_elem(self,i,val):
-       if not val in np.arange(10):
-         raise ValueError
-       if (val!=0) and (val in self.data):
-         raise ValueError
-       row = math.floor(i/self.board.ysize)
-       col = (i%self.board.xsize)
-       self.board.prev_data = np.copy(self.board.data)
-       self.data[row,col] = val
-
 class Error(Exception): 
    """ Base class for exceptions in this module."""
    pass
@@ -230,18 +175,12 @@ class ImpossibleGridError(Error):
 def main(args):
   p = sudoku_puzzle(2,2)
   
-  d = np.copy(p.complete_board.data) 
-  d[0,1] = 0
-  d[0,2] = 0
-  d[1,0] = 0
-  d[2,3] = 0
-  d[3,1] = 0
-  d[3,2] = 0
+  print(p.complete_board)
+  print(p.board)
 
-  b = sudoku_board(2,2)
-  b.populate(d)
-  print(b.Npossible)
-  pdb.set_trace()
+  populated_elements = np.argwhere(p.board.data!=p.board.unknown_val)  # candidate spots, which are populated
+  #remove_elem = populated_elements[np.random.randint(0,len(populated_elements))]
+  #d[tuple(remove_elem)] = 0
 
 parser = argparse.ArgumentParser(description="Generate Sudoku Puzzles")
 parser.add_argument('--size',type=int,nargs=2,dest='size',default=[2,3],help='x and y size of puzzle')
