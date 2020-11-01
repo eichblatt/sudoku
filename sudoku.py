@@ -30,14 +30,18 @@ class sudoku_puzzle:
       """ generate a puzzle from the board, based on difficulty. 
           Remove an element at a time, and ensure that it is solvable. """
 
-      while self.is_solvable(self.board): 
+      solvable = True
+      itry = 0
+      while solvable and itry<5+difficulty:
+        itry = itry + 1
+        solvable = self.is_solvable(self.board) 
         self.board_stack.append(np.copy(self.board.data))
         populated_elements = np.argwhere(self.board.data!=self.board.unknown_val) 
         remove_elem = populated_elements[np.random.randint(0,len(populated_elements))]
         self.board.unset_cell(remove_elem[0],remove_elem[1])
          
       self.board_stack.pop()
-      self.board.populate(self.board_stack[-1])
+      self.board.populate_from_initial(self.board_stack[-1])
 
       return self.board
 
@@ -45,7 +49,6 @@ class sudoku_puzzle:
       """ Solve the given board. Throw ImpossibleGridError if board is unsolvable """
       tmp = sudoku_board(board.xsize,board.ysize)
       tmp.populate(board.data,uniquely=True)
-      
       return tmp.data
 
     def is_solvable(self,board):
@@ -65,8 +68,10 @@ class sudoku_puzzle:
          except ImpossibleGridError as err:
            print (err.message)
            solvable = False
+           pdb.set_trace()
          except:
            print ("Error Solving")
+           pdb.set_trace()
       return solvable
 
 
@@ -90,6 +95,8 @@ class sudoku_board:
         except ImpossibleGridError as err:
           logger.debug ("{}\n {}".format(err.message,err.board_data))
           pass
+        except:
+          logger.warn("Error populating board")
 
     def __str__(self):
       return str(self.data)
@@ -129,8 +136,9 @@ class sudoku_board:
       self.Npossible = (self.possible>self.unknown_val).sum(2)
       return self.possible
 
-    def populate_from_initial(self,initial_data):
+    def populate_from_initial(self,initial_data=None):
       self.unset_board()
+      if initial_data is None: return self.data
       self.data = np.copy(initial_data)
       it = np.nditer(self.data,flags=['multi_index'])
       for elem in it: 
@@ -153,15 +161,40 @@ class sudoku_board:
       return mask
  
     def populate(self,initial_data=None,uniquely=False):
-      if not(initial_data is None): return self.populate_from_initial(initial_data)
-      else: 
-        self.unset_board()
-        mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
-        while mask.sum() > 0: mask = self.populate_cell(mask,uniquely)
+      self.populate_from_initial(initial_data)
+      if (initial_data is None) and uniquely: raise ImpossibleGridError(self.data,"Can't uniquely solve empty")
+      mask = self.data==self.unknown_val  # candidate spots, which have not yet been populated
+      while mask.sum() > 0: mask = self.populate_cell(mask,uniquely)
       return self.data
 
+    def display_possible(self):
+      result_string = ''
+      for row in range(self.data.shape[0]):
+        for col in range(self.data.shape[1]):
+          poss = self.possible[row,col]
+          known_b = self.data[row,col]!=self.unknown_val
+          knowns = poss!=self.unknown_val
+          if known_b:
+            tmp = "("+str(self.data[row,col])+")"
+          elif knowns.sum()==1:
+            tmp = " " + str(poss[knowns][0])+" "
+          elif knowns.sum()==0:
+            tmp = "   "
+          else:
+            tmp = str(-1*knowns.sum()) + " "
+          result_string = result_string + tmp
+        result_string = result_string + "\n"
+      print(result_string)
+
+
     def display(self):
-      print (self.data)
+      result_string = ''
+      for row in range(self.data.shape[0]):
+        tmp = ''.join([str(k)+" " for k in self.data[row]])
+        tmp = tmp.replace(str(self.unknown_val)," ")
+        result_string = result_string + tmp + "\n" 
+      print (result_string)
+      return None
  
 class Error(Exception): 
    """ Base class for exceptions in this module."""
